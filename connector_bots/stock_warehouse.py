@@ -455,6 +455,7 @@ class WarehouseAdapter(BotsCRUDAdapter):
                             self._check_picking_document(_cr, self.session.uid, picking, main_picking, context=ctx)
 
                             move_dict = {}
+                            pol_dict = {}
                             moves_extra = {}
                             
                             product_external_ids = [line['product'] for line in picking['line']]
@@ -493,6 +494,12 @@ class WarehouseAdapter(BotsCRUDAdapter):
                                         move = res_dict[move_id]
                                         key = (move['id'], move['picking_id'], move['product_id'])
                                         if qty and sum(move_dict.get(key, {}).values()) < move['product_qty']:
+                                            if picking['type'] == 'in':
+                                                move_dict.setdefault(key, {})[ptype] = move_dict.setdefault(key, {}).get(ptype, 0) + qty
+                                                if qty > move['product_qty']:
+                                                    pol_dict[key] = qty
+                                                qty = 0
+                                                break
                                             qty_to_add = min(move['product_qty'], qty)
                                             qty -= qty_to_add
                                             move_dict.setdefault(key, {})[ptype] = move_dict.setdefault(key, {}).get(ptype, 0) + qty_to_add
@@ -502,6 +509,11 @@ class WarehouseAdapter(BotsCRUDAdapter):
                                 # No moves found or unallocated qty, handle these separatly if possible
                                 if qty:
                                     moves_extra.setdefault(ptype, []).append((product_id, qty))
+
+                                # Update existing pol with new qty
+                                for (move_id, picking_id, product_id), qty in pol_dict.iteritems():
+                                    move = move_obj.browse(_cr, self.session.uid, move_id, context=ctx)
+                                    purchase_line_obj.write(_cr, self.session.uid, [move.purchase_line_id.id] , {'product_qty':qty}, context=ctx)
 
                             # Group moves and qtys by pickings and type
                             type_picking_move_dict = {} # Dicts of move_id and qty
